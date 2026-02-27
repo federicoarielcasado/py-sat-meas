@@ -1,4 +1,4 @@
-# RoofScan — Detección de Superficies Cubiertas con Imágenes Satelitales
+# Py-sat-meas — Detección de Superficies Cubiertas con Imágenes Satelitales
 
 Herramienta de escritorio para detectar y medir superficies cubiertas (techos) a partir de imágenes satelitales Sentinel-2. Reemplaza el flujo manual de medición en Google Maps con un pipeline automatizado, reproducible y exportable.
 
