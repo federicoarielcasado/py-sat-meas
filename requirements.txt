@@ -1,0 +1,39 @@
+# Geoespacial
+rasterio>=1.3
+shapely>=2.0
+geopandas>=0.14
+pyproj>=3.6
+
+# Descarga satelital Sentinel-2 desde CDSE
+cdsetool>=0.3
+python-dotenv>=1.0
+
+# HTTP (WMS CartoARBA + Nominatim geocoding)
+requests>=2.31
+Pillow>=10.0
+
+# Utilitarios
+numpy>=1.26
+pandas>=2.0
+tqdm>=4.66
+
+# Visualización
+matplotlib>=3.8
+
+# GUI
+PyQt6>=6.6
+
+# Visión computacional (motor clásico)
+opencv-python-headless>=4.9
+scikit-image>=0.22
+scipy>=1.12
+
+# Deep Learning (motor U-Net — Sprint 4)
+# Instalar PyTorch según tu hardware: https://pytorch.org/get-started/locally/
+# CPU:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# GPU:  pip install torch torchvision  (detecta CUDA automáticamente)
+torch>=2.1
+segmentation-models-pytorch>=0.3.3
+
+# Configuración
+pyyaml>=6.0

@@ -1,0 +1,36 @@
+# Credenciales — nunca versionar
+.env
+
+# Documentación interna de planificación
+Claude.md
+docs/sprint6_pending.md
+
+# Datos y caché satelital
+data/cache/
+data/feedback/
+data/models/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# Jupyter
+.ipynb_checkpoints/
