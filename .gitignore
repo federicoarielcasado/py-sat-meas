@@ -1,6 +1,10 @@
 # Credenciales — nunca versionar
 .env
 
+# Documentación interna de planificación
+Claude.md
+docs/sprint6_pending.md
+
 # Datos y caché satelital (runtime, no versionar)
 data/cache/
 data/feedback/
