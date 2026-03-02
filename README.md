@@ -138,6 +138,35 @@ pytest tests/test_dl.py -v
 
 ---
 
+## Distribución para Windows
+
+Se incluyen dos métodos para empaquetar la aplicación y distribuirla sin necesidad de instalar Python:
+
+### Opción A — PyInstaller (ejecutable nativo)
+
+```bash
+# Activar entorno con todas las dependencias instaladas
+pip install pyinstaller
+
+# Compilar
+build_windows.bat
+# Resultado: dist\RoofScan\RoofScan.exe
+```
+
+Comprime la carpeta `dist\RoofScan\` y compártela. El usuario solo necesita extraerla y ejecutar `RoofScan.exe`.
+
+### Opción B — conda-pack (entorno completo)
+
+Más robusto con dependencias nativas (GDAL, rasterio). Produce un ZIP más grande (~2–4 GB).
+
+```bash
+conda activate roofscan
+build_conda.bat
+# Resultado: roofscan_env.zip + launch_roofscan.bat
+```
+
+---
+
 ## Limitaciones conocidas
 
 - Sentinel-2 tiene resolución de 10 m/px. Techos con superficie < ~30 m² se detectan con menor precisión.
