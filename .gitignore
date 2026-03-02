@@ -1,0 +1,39 @@
+# Credenciales — nunca versionar
+.env
+
+# Datos y caché satelital (runtime, no versionar)
+data/cache/
+data/feedback/
+data/models/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Windows
+desktop.ini
+Thumbs.db
+
+# Backups y empaquetados locales
+*.zip

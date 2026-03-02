@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "roofscan"
+version = "0.1.0"
+description = "Detección automática de superficies cubiertas con imágenes satelitales"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Fede" }]
+dependencies = [
+    "rasterio>=1.3",
+    "shapely>=2.0",
+    "geopandas>=0.14",
+    "pyproj>=3.6",
+    "cdsetool>=0.3",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "tqdm>=4.66",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-mock>=3.12"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["roofscan*"]
+
+[tool.pytest.ini_options]
+markers = ["network: tests que requieren conexión a internet y credenciales CDSE"]
+testpaths = ["tests"]
