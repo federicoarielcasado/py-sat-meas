@@ -48,7 +48,9 @@ _SEED = 42
 
 # Estratos: (nombre, área_min_m2, área_max_m2, n_parcelas)
 # Diseñados para cubrir el rango residencial de Luján:
-#   - pequeña:    4-6 px en Sentinel-2; casas chicas, garajes
+#   - pequeña:    ~2-6 px en Sentinel-2; viviendas mínimas (~25 m²), garajes
+#                 Nota: el sistema puede detectar desde ~25-30 m² pero con menor
+#                 precisión que en categorías mayores (≈ 2-3 píxeles de 10 m).
 #   - mediana:    6-16 px; vivienda residencial típica
 #   - grande:     >16 px; casas grandes, comercios
 #   - industrial: galpones, naves, depósitos
@@ -61,7 +63,7 @@ _ESTRATOS = [
 
 # Rubrica de clasificación manual (para referencia en el CSV)
 _RUBRICA = (
-    "VIVIENDA: área ≤ 400 m², forma compacta, uso residencial. "
+    "VIVIENDA: área desde ~25 m² hasta ≤ 400 m², forma compacta, uso residencial. "
     "GALPON: área > 300 m², muy elongado (largo/ancho > 2). "
     "INDUSTRIAL: área > 1500 m², naves o depósitos. "
     "OTRO: garajes, estructuras irregulares, mixto."
@@ -217,7 +219,7 @@ def main() -> None:
     log.info("     Trazá el contorno del techo para obtener el área en m².")
     log.info("  4. Completá 'area_manual_m2' con el valor medido.")
     log.info("  5. Completá 'tipo_manual' según la rubrica:")
-    log.info("       VIVIENDA  → casa residencial (compacta, ≤ 400 m²)")
+    log.info("       VIVIENDA  → casa residencial (compacta, desde ~25 m² hasta ≤ 400 m²)")
     log.info("       GALPON    → elongado, chapa, > 300 m²")
     log.info("       INDUSTRIAL→ nave/depósito grande, > 1500 m²")
     log.info("       OTRO      → garaje, estructura irregular, mixto")
