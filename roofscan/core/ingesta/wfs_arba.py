@@ -273,7 +273,7 @@ def _from_wfs(
         "typeName": _WFS_TYPENAME,
         "outputFormat": _WFS_OUTPUT_FORMAT,
         "count": _WFS_MAX_FEATURES,
-        "bbox": f"{lon_min},{lat_min},{lon_max},{lat_max},urn:ogc:def:crs:EPSG::4326",
+        "bbox": f"{lon_min},{lat_min},{lon_max},{lat_max},EPSG:4326",
     }
     if cql_parts:
         params["CQL_FILTER"] = " AND ".join(cql_parts)

@@ -5,6 +5,11 @@ Novedades respecto a Sprint 3:
 - Soporta overlay semitransparente de la capa de parcelas CartoARBA (WMS).
 - Emite la señal ``geo_clicked(lat, lon)`` cuando el usuario hace clic
   sobre el canvas, expresada en coordenadas geográficas.
+
+Novedades post-Sprint 6:
+- Modo dibujo de bbox interactivo via ``enable_bbox_draw()``.
+- Emite ``bbox_selected(lon_min, lat_min, lon_max, lat_max)`` al terminar
+  de dibujar el rectángulo.
 """
 
 import numpy as np
@@ -18,14 +23,18 @@ class MapWidget(QWidget):
     """Canvas matplotlib embebido en Qt para visualización de rasters.
 
     Signals:
-        geo_clicked (float, float): Emitida al hacer clic en el canvas.
-            Los argumentos son ``(lat, lon)`` en WGS84.
+        geo_clicked (float, float): Emitida al hacer clic en el canvas
+            fuera del modo dibujo. Argumentos: ``(lat, lon)`` en WGS84.
+        bbox_selected (float, float, float, float): Emitida al completar
+            un rectángulo en modo dibujo.
+            Argumentos: ``(lon_min, lat_min, lon_max, lat_max)`` en WGS84.
 
     Args:
         parent: Widget padre de Qt.
     """
 
-    geo_clicked = pyqtSignal(float, float)   # lat, lon
+    geo_clicked = pyqtSignal(float, float)              # lat, lon
+    bbox_selected = pyqtSignal(float, float, float, float)  # lon_min, lat_min, lon_max, lat_max
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,6 +42,8 @@ class MapWidget(QWidget):
         self._mask = None
         self._geo_extent_wgs84 = None   # (lon_min, lon_max, lat_min, lat_max)
         self._wms_overlay = None        # array RGBA del overlay de parcelas
+        self._draw_mode = False         # True cuando el RectangleSelector está activo
+        self._selector = None           # matplotlib.widgets.RectangleSelector
 
         self.figure = Figure(figsize=(6, 6), tight_layout=True)
         self.canvas = FigureCanvas(self.figure)
@@ -195,6 +206,7 @@ class MapWidget(QWidget):
 
     def clear(self) -> None:
         """Limpia el canvas y muestra el placeholder."""
+        self.enable_bbox_draw(False)
         self._data = None
         self._mask = None
         self._geo_extent_wgs84 = None
@@ -202,11 +214,50 @@ class MapWidget(QWidget):
         self._show_placeholder()
 
     # ------------------------------------------------------------------
+    # API pública — dibujo interactivo de bbox
+    # ------------------------------------------------------------------
+
+    def enable_bbox_draw(self, active: bool) -> None:
+        """Activa o desactiva el modo de dibujo de bounding box.
+
+        En modo activo el usuario arrastra el ratón para definir un
+        rectángulo georreferenciado. Al soltar el botón se emite la señal
+        ``bbox_selected``. El modo se desactiva automáticamente al recibir
+        ``False`` o al llamar a ``clear()``.
+
+        Args:
+            active: ``True`` para activar el selector, ``False`` para desactivarlo.
+        """
+        self._draw_mode = active
+
+        if active and self._data is not None:
+            from matplotlib.widgets import RectangleSelector
+            self._selector = RectangleSelector(
+                self.ax,
+                self._on_rect_select,
+                useblit=True,
+                button=[1],
+                minspanx=5,
+                minspany=5,
+                spancoords="pixels",
+                props=dict(edgecolor="cyan", facecolor="cyan", alpha=0.15, linewidth=1.5),
+                interactive=False,
+            )
+        else:
+            if self._selector is not None:
+                self._selector.set_active(False)
+                self._selector = None
+            self.canvas.draw_idle()
+
+    # ------------------------------------------------------------------
     # Slots privados
     # ------------------------------------------------------------------
 
     def _on_mpl_click(self, event) -> None:
         """Convierte el clic matplotlib (píxel) a coordenadas geográficas y emite señal."""
+        # En modo dibujo, el RectangleSelector gestiona los eventos
+        if self._draw_mode:
+            return
         if event.inaxes is None or self._geo_extent_wgs84 is None or self._data is None:
             return
         if event.xdata is None or event.ydata is None:
@@ -225,6 +276,31 @@ class MapWidget(QWidget):
         # Verificar que el punto esté dentro del extent
         if lon_min <= lon <= lon_max and lat_min <= lat <= lat_max:
             self.geo_clicked.emit(round(lat, 6), round(lon, 6))
+
+    def _on_rect_select(self, eclick, erelease) -> None:
+        """Convierte el rectángulo dibujado a coordenadas WGS84 y emite señal."""
+        if self._geo_extent_wgs84 is None or self._data is None:
+            return
+        if eclick.xdata is None or erelease.xdata is None:
+            return
+
+        lon_min_e, lon_max_e, lat_min_e, lat_max_e = self._geo_extent_wgs84
+        _, img_h, img_w = self._data.shape
+
+        x1 = min(eclick.xdata, erelease.xdata)
+        x2 = max(eclick.xdata, erelease.xdata)
+        y1 = min(eclick.ydata, erelease.ydata)   # y pequeño = parte superior = lat mayor
+        y2 = max(eclick.ydata, erelease.ydata)
+
+        lon1 = lon_min_e + (x1 / img_w) * (lon_max_e - lon_min_e)
+        lon2 = lon_min_e + (x2 / img_w) * (lon_max_e - lon_min_e)
+        lat2 = lat_max_e - (y1 / img_h) * (lat_max_e - lat_min_e)  # top → lat_max
+        lat1 = lat_max_e - (y2 / img_h) * (lat_max_e - lat_min_e)  # bottom → lat_min
+
+        self.bbox_selected.emit(
+            round(lon1, 6), round(lat1, 6),
+            round(lon2, 6), round(lat2, 6),
+        )
 
     # ------------------------------------------------------------------
     # Helpers de dibujo internos
