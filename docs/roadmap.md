@@ -86,26 +86,26 @@ de Luján y obtener el área de techo de cada una, sin intervención manual.
 - `spatial_join.py`: intersección exacta techo ↔ parcela con área, % cubierto y n_techos.
 - `scripts/batch_mensura.py`: pipeline CLI end-to-end.
 
-**Bloqueante principal — datos catastrales:**
-El WFS de ARBA (`geo.arba.gov.ar`) está deshabilitado en el servidor actual.
-Para el partido completo se requiere una de las siguientes fuentes:
-
-| Fuente | URL | Formato |
-|--------|-----|---------|
-| Datos Abiertos Buenos Aires *(recomendada)* | https://datos.gba.gob.ar/dataset/catastro-territorial | GeoPackage / SHP |
-| IGN — Capas SIG Argentina | https://www.ign.gob.ar/NuestrasActividades/InformacionGeoespacial/CapasIG | SHP |
-
-Descarga única → guardar en `data/catastro/lujan.gpkg` → el script la reutiliza en adelante.
-
-**Flujo completo una vez con el catastro disponible:**
+**Bloqueante RESUELTO (2026-03-03):**
+El WFS `https://geo.arba.gov.ar/geoserver/idera/wfs` está operativo.
+Bug corregido en `wfs_arba.py` (formato CRS: `urn:ogc:def:crs:EPSG::4326` → `EPSG:4326`).
+`scripts/download_catastro.py` descarga las ~140k parcelas con paginación WFS:
 ```bash
-# 1. Descargar imagen Sentinel-2 de Luján (desde la GUI o CLI)
-# 2. Ejecutar mensura
+python scripts/download_catastro.py
+# → data/catastro/lujan_parcelas.gpkg (~20-50 MB, ~5-8 min)
+```
+
+**Flujo completo:**
+```bash
+# 1. Descargar catastro (una sola vez)
+python scripts/download_catastro.py
+# 2. Descargar imagen Sentinel-2 de Luján (desde la GUI o CLI)
+# 3. Ejecutar mensura
 python scripts/batch_mensura.py \
     --image data/cache/S2A_MSIL2A_..._stacked.tif \
-    --parcelas data/catastro/lujan.gpkg \
+    --parcelas data/catastro/lujan_parcelas.gpkg \
     --output data/output/mensura_lujan.csv \
-    --output-geojson
+    --output-geojson --classify
 ```
 
 **Salida:** CSV + GeoJSON con una fila por parcela:
@@ -122,7 +122,8 @@ python scripts/batch_mensura.py \
 ```
 
 **Pendiente para completar el objetivo:**
-- [ ] Descargar y validar el archivo catastral del partido de Luján.
+- [x] Descargar catastro — `scripts/download_catastro.py` listo (WFS operativo).
+- [ ] Ejecutar `download_catastro.py` en el entorno local para generar el .gpkg.
 - [ ] Ejecutar el pipeline sobre una imagen real y verificar resultados.
 - [ ] Si la detección clásica no es suficientemente precisa, correr con motor U-Net (requiere preentrenamiento previo con `prepare_tiles.py` + `pretrain_unet.py`).
 
