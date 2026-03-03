@@ -5,7 +5,7 @@ geopandas>=0.14
 pyproj>=3.6
 
 # Descarga satelital Sentinel-2 desde CDSE
-cdsetool>=0.3
+cdsetool>=0.2,<0.3
 python-dotenv>=1.0
 
 # HTTP (WMS CartoARBA + Nominatim geocoding)

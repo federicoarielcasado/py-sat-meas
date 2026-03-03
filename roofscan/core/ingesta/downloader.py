@@ -100,7 +100,7 @@ def search_sentinel2(
 
         features = list(
             query_features(
-                "Sentinel2",
+                "SENTINEL-2",
                 {
                     "startDate": date_range[0],
                     "completionDate": date_range[1],
