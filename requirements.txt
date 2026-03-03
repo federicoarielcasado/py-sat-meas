@@ -5,7 +5,8 @@ geopandas>=0.14
 pyproj>=3.6
 
 # Descarga satelital Sentinel-2 desde CDSE
-cdsetool>=0.2,<0.3
+# cdsetool eliminado: usaba OpenSearch API dada de baja el 2026-02-02
+# Ahora se usa STAC API + OData API directamente con requests
 python-dotenv>=1.0
 
 # HTTP (WMS CartoARBA + Nominatim geocoding)

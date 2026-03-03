@@ -1,5 +1,9 @@
 """Módulo de descarga de imágenes Sentinel-2 desde Copernicus Data Space Ecosystem (CDSE).
 
+Usa la STAC API para búsqueda (sin auth) y la OData API con bearer token para
+descarga. La OpenSearch API usada por cdsetool 0.2.x fue dada de baja el
+2026-02-02 y ya no está disponible.
+
 Requiere credenciales CDSE gratuitas (registro en https://dataspace.copernicus.eu).
 Las credenciales se leen de variables de entorno CDSE_USER y CDSE_PASSWORD,
 o de un archivo .env en la raíz del proyecto.
@@ -11,22 +15,23 @@ Uso típico::
 
     paths = download_sentinel2(
         bbox=LUJAN_BBOX_WGS84,
-        date_range=("2024-01-01", "2024-03-31"),
+        date_range=("2025-06-01", "2025-08-31"),
         output_dir=CACHE_DIR,
         max_cloud_pct=15,
     )
 """
 
 import os
+import re
 import logging
+import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
+import requests
 from dotenv import load_dotenv
 
 from roofscan.config import (
-    S2_PRODUCT_TYPE,
     DEFAULT_MAX_CLOUD_PCT,
     CACHE_DIR,
 )
@@ -34,12 +39,26 @@ from roofscan.config import (
 load_dotenv()
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# URLs públicas CDSE
+# ---------------------------------------------------------------------------
+_STAC_URL = (
+    "https://catalogue.dataspace.copernicus.eu"
+    "/stac/collections/sentinel-2-l2a/items"
+)
+_TOKEN_URL = (
+    "https://identity.dataspace.copernicus.eu"
+    "/auth/realms/CDSE/protocol/openid-connect/token"
+)
+_DOWNLOAD_BASE = (
+    "https://download.dataspace.copernicus.eu/odata/v1/Products"
+)
 
 # ---------------------------------------------------------------------------
 # Tipos auxiliares
 # ---------------------------------------------------------------------------
-BBox = tuple[float, float, float, float]  # (lon_min, lat_min, lon_max, lat_max)
-DateRange = tuple[str, str]               # ("YYYY-MM-DD", "YYYY-MM-DD")
+BBox = tuple[float, float, float, float]   # (lon_min, lat_min, lon_max, lat_max)
+DateRange = tuple[str, str]                # ("YYYY-MM-DD", "YYYY-MM-DD")
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +71,9 @@ def search_sentinel2(
     max_cloud_pct: float = DEFAULT_MAX_CLOUD_PCT,
     max_results: int = 10,
 ) -> list[dict]:
-    """Busca escenas Sentinel-2 L2A disponibles en CDSE para la zona y fechas dadas.
+    """Busca escenas Sentinel-2 L2A disponibles en CDSE.
+
+    Usa la STAC API de CDSE (no requiere autenticación).
 
     Args:
         bbox: Bounding box en WGS84 ``(lon_min, lat_min, lon_max, lat_max)``.
@@ -61,74 +82,68 @@ def search_sentinel2(
         max_results: Número máximo de resultados a retornar.
 
     Returns:
-        Lista de dicts con metadatos de cada escena. Cada dict contiene al menos
+        Lista de dicts con metadatos de cada escena. Cada dict contiene:
         ``{"id": str, "name": str, "date": str, "cloud_pct": float, "size_mb": float}``.
 
     Raises:
-        EnvironmentError: Si las credenciales CDSE no están configuradas.
         ConnectionError: Si no se puede conectar a la API de CDSE.
         ValueError: Si los parámetros de entrada son inválidos.
     """
     _validate_bbox(bbox)
     _validate_date_range(date_range)
-    _check_credentials()
 
-    try:
-        from cdsetool.query import query_features
-        from cdsetool.credentials import Credentials
-    except ImportError as exc:
-        raise ImportError(
-            "La librería 'cdsetool' no está instalada. "
-            "Ejecutá: pip install cdsetool"
-        ) from exc
-
-    user = os.environ["CDSE_USER"]
-    password = os.environ["CDSE_PASSWORD"]
+    lon_min, lat_min, lon_max, lat_max = bbox
 
     log.info(
-        "Buscando Sentinel-2 L2A | bbox=%s | fechas=%s–%s | nube<=%s%%",
+        "Buscando Sentinel-2 L2A | bbox=%s | fechas=%s-%s | nube<=%s%%",
         bbox, date_range[0], date_range[1], max_cloud_pct,
     )
 
     try:
-        credentials = Credentials(user, password)
-        lon_min, lat_min, lon_max, lat_max = bbox
-        aoi_wkt = (
-            f"POLYGON(({lon_min} {lat_min},{lon_max} {lat_min},"
-            f"{lon_max} {lat_max},{lon_min} {lat_max},{lon_min} {lat_min}))"
+        resp = requests.get(
+            _STAC_URL,
+            params={
+                "bbox": f"{lon_min},{lat_min},{lon_max},{lat_max}",
+                "datetime": f"{date_range[0]}T00:00:00Z/{date_range[1]}T23:59:59Z",
+                "limit": min(max_results * 4, 100),
+                "sortby": "-datetime",
+            },
+            timeout=30,
         )
-
-        features = list(
-            query_features(
-                "SENTINEL-2",
-                {
-                    "startDate": date_range[0],
-                    "completionDate": date_range[1],
-                    "processingLevel": "S2MSI2A",
-                    "cloudCover": f"[0,{int(max_cloud_pct)}]",
-                    "geometry": aoi_wkt,
-                },
-            )
-        )[:max_results]
-
-    except Exception as exc:
+        resp.raise_for_status()
+    except requests.RequestException as exc:
         raise ConnectionError(
             f"Error al conectar con CDSE: {exc}. "
-            "Verificá tu conexión a internet y tus credenciales."
+            "Verificá tu conexión a internet."
         ) from exc
 
-    results = []
+    features = resp.json().get("features", [])
+
+    results: list[dict] = []
     for feat in features:
         props = feat.get("properties", {})
+        cloud_pct = float(props.get("eo:cloud_cover", 100.0))
+        if cloud_pct > max_cloud_pct:
+            continue
+
+        # Extraer ID de producto desde el asset "Product" (URL OData)
+        assets = feat.get("assets", {})
+        odata_href = assets.get("Product", {}).get("href", "")
+        m = re.search(r"Products\(([^)]+)\)", odata_href)
+        product_id = m.group(1) if m else feat.get("id", "")
+
         results.append({
-            "id": feat.get("id", ""),
-            "name": props.get("title", ""),
-            "date": props.get("startDate", "")[:10],
-            "cloud_pct": props.get("cloudCover", 0.0),
-            "size_mb": props.get("services", {}).get("download", {}).get("size", 0) / 1e6,
+            "id": product_id,
+            "name": feat.get("id", ""),
+            "date": str(props.get("datetime", ""))[:10],
+            "cloud_pct": cloud_pct,
+            "size_mb": 0.0,   # STAC no expone tamaño; S2 L2A ~800-1100 MB
         })
 
-    log.info("Se encontraron %d escenas.", len(results))
+        if len(results) >= max_results:
+            break
+
+    log.info("Se encontraron %d escenas con nube<=%.0f%%.", len(results), max_cloud_pct)
     return results
 
 
@@ -139,9 +154,11 @@ def download_sentinel2(
     max_cloud_pct: float = DEFAULT_MAX_CLOUD_PCT,
     max_scenes: int = 1,
 ) -> list[Path]:
-    """Descarga escenas Sentinel-2 L2A desde CDSE.
+    """Descarga escenas Sentinel-2 L2A desde CDSE vía OData.
 
-    Descarga la(s) escena(s) con menor nubosidad dentro del rango solicitado.
+    Descarga las escenas con menor nubosidad dentro del rango solicitado.
+    El archivo se descarga como .zip y se descomprime automáticamente al
+    directorio .SAFE correspondiente.
 
     Args:
         bbox: Bounding box en WGS84 ``(lon_min, lat_min, lon_max, lat_max)``.
@@ -156,15 +173,14 @@ def download_sentinel2(
     Raises:
         EnvironmentError: Si las credenciales CDSE no están configuradas.
         ConnectionError: Si falla la comunicación con la API.
-        RuntimeError: Si no se encontraron escenas para los parámetros dados.
-        ValueError: Si los parámetros de entrada son inválidos.
+        RuntimeError: Si no se encontraron escenas o el ZIP está corrupto.
     """
     if output_dir is None:
         output_dir = CACHE_DIR
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    scenes = search_sentinel2(bbox, date_range, max_cloud_pct, max_results=max_scenes * 3)
+    scenes = search_sentinel2(bbox, date_range, max_cloud_pct, max_results=max_scenes * 4)
 
     if not scenes:
         raise RuntimeError(
@@ -173,51 +189,19 @@ def download_sentinel2(
             "Probá ampliar el rango de fechas o aumentar el límite de nubosidad."
         )
 
-    # Ordenar por nubosidad ascendente y tomar las primeras max_scenes
     scenes_sorted = sorted(scenes, key=lambda s: s["cloud_pct"])[:max_scenes]
+    token = _get_token()
 
-    try:
-        from cdsetool.download import download_feature
-        from cdsetool.credentials import Credentials
-    except ImportError as exc:
-        raise ImportError("La librería 'cdsetool' no está instalada.") from exc
-
-    user = os.environ["CDSE_USER"]
-    password = os.environ["CDSE_PASSWORD"]
-    credentials = Credentials(user, password)
-
-    downloaded_paths: list[Path] = []
+    downloaded: list[Path] = []
     for scene in scenes_sorted:
-        scene_id = scene["id"]
-        scene_name = scene["name"]
-        dest = output_dir / scene_name
+        path = _download_scene(scene, output_dir, token)
+        downloaded.append(path)
 
-        if dest.exists():
-            log.info("Escena ya descargada, omitiendo: %s", scene_name)
-            downloaded_paths.append(dest)
-            continue
-
-        log.info(
-            "Descargando %s (nube=%.1f%%, ~%.0f MB)...",
-            scene_name, scene["cloud_pct"], scene["size_mb"],
-        )
-        try:
-            download_feature(scene_id, str(output_dir), credentials)
-            downloaded_paths.append(dest)
-            log.info("Descarga completa: %s", dest)
-        except Exception as exc:
-            raise ConnectionError(
-                f"Error al descargar la escena {scene_name}: {exc}"
-            ) from exc
-
-    return downloaded_paths
+    return downloaded
 
 
 def download_by_id(scene: dict, output_dir: Path | None = None) -> Path:
     """Descarga una escena Sentinel-2 específica dado su dict de metadatos.
-
-    Equivalente a ``download_sentinel2`` pero opera sobre una escena ya
-    identificada por la búsqueda, evitando repetir la consulta a la API.
 
     Args:
         scene: Dict con al menos ``{"id": str, "name": str}`` tal como
@@ -230,7 +214,6 @@ def download_by_id(scene: dict, output_dir: Path | None = None) -> Path:
     Raises:
         EnvironmentError: Si las credenciales CDSE no están configuradas.
         ConnectionError: Si falla la comunicación con la API de CDSE.
-        ImportError: Si cdsetool no está instalado.
     """
     if output_dir is None:
         output_dir = CACHE_DIR
@@ -238,47 +221,123 @@ def download_by_id(scene: dict, output_dir: Path | None = None) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     _check_credentials()
-
-    try:
-        from cdsetool.download import download_feature
-        from cdsetool.credentials import Credentials
-    except ImportError as exc:
-        raise ImportError("La librería 'cdsetool' no está instalada.") from exc
-
-    scene_id = scene["id"]
-    scene_name = scene["name"]
-    dest = output_dir / scene_name
-
-    if dest.exists():
-        log.info("Escena ya descargada, omitiendo: %s", scene_name)
-        return dest
-
-    user = os.environ["CDSE_USER"]
-    password = os.environ["CDSE_PASSWORD"]
-    credentials = Credentials(user, password)
-
-    log.info(
-        "Descargando %s (nube=%.1f%%, ~%.0f MB)…",
-        scene_name, scene.get("cloud_pct", 0), scene.get("size_mb", 0),
-    )
-    try:
-        download_feature(scene_id, str(output_dir), credentials)
-        log.info("Descarga completa: %s", dest)
-        return dest
-    except Exception as exc:
-        raise ConnectionError(
-            f"Error al descargar la escena {scene_name}: {exc}"
-        ) from exc
+    token = _get_token()
+    return _download_scene(scene, output_dir, token)
 
 
 # ---------------------------------------------------------------------------
 # Helpers privados
 # ---------------------------------------------------------------------------
 
+def _get_token() -> str:
+    """Obtiene bearer token desde el Identity Provider de CDSE.
+
+    Returns:
+        Token JWT como string.
+
+    Raises:
+        EnvironmentError: Si las credenciales son inválidas o faltan.
+    """
+    _check_credentials()
+    user = os.environ["CDSE_USER"]
+    password = os.environ["CDSE_PASSWORD"]
+
+    try:
+        resp = requests.post(
+            _TOKEN_URL,
+            data={
+                "grant_type": "password",
+                "username": user,
+                "password": password,
+                "client_id": "cdse-public",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["access_token"]
+    except Exception as exc:
+        raise EnvironmentError(
+            f"Error al obtener token CDSE: {exc}. "
+            "Verificá tus credenciales (CDSE_USER / CDSE_PASSWORD) en el archivo .env."
+        ) from exc
+
+
+def _download_scene(scene: dict, output_dir: Path, token: str) -> Path:
+    """Descarga un producto .SAFE como ZIP y lo descomprime.
+
+    Args:
+        scene: Dict con ``{"id": str, "name": str, ...}``.
+        output_dir: Directorio destino.
+        token: Bearer token de autenticación CDSE.
+
+    Returns:
+        Path al directorio ``.SAFE`` descomprimido.
+
+    Raises:
+        ConnectionError: Si falla la descarga HTTP.
+        RuntimeError: Si el ZIP descargado está corrupto.
+    """
+    scene_name = scene["name"]
+    safe_path = output_dir / (scene_name + ".SAFE")
+
+    if safe_path.exists():
+        log.info("Escena ya descargada, omitiendo: %s", scene_name)
+        return safe_path
+
+    product_id = scene["id"]
+    url = f"{_DOWNLOAD_BASE}({product_id})/$value"
+    zip_path = output_dir / (scene_name + ".zip")
+
+    log.info(
+        "Descargando %s (nube=%.1f%%)...",
+        scene_name, scene.get("cloud_pct", 0.0),
+    )
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        with requests.get(url, headers=headers, stream=True, timeout=600) as resp:
+            resp.raise_for_status()
+            total = int(resp.headers.get("Content-Length", 0))
+            downloaded = 0
+            with open(zip_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        log.info(
+                            "  %.1f%% (%.0f / %.0f MB)",
+                            downloaded / total * 100,
+                            downloaded / 1e6,
+                            total / 1e6,
+                        )
+    except requests.RequestException as exc:
+        zip_path.unlink(missing_ok=True)
+        raise ConnectionError(
+            f"Error al descargar {scene_name}: {exc}"
+        ) from exc
+
+    log.info("Descomprimiendo %s...", zip_path.name)
+    try:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            z.extractall(output_dir)
+        zip_path.unlink()
+    except zipfile.BadZipFile as exc:
+        zip_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            "El archivo descargado no es un ZIP válido. "
+            "Las credenciales CDSE pueden haber expirado — volvé a intentarlo."
+        ) from exc
+
+    log.info("Descarga completa: %s", safe_path)
+    return safe_path
+
+
 def _validate_bbox(bbox: BBox) -> None:
     """Valida que el bounding box tenga formato y valores correctos."""
     if len(bbox) != 4:
-        raise ValueError("bbox debe tener exactamente 4 valores: (lon_min, lat_min, lon_max, lat_max)")
+        raise ValueError(
+            "bbox debe tener exactamente 4 valores: (lon_min, lat_min, lon_max, lat_max)"
+        )
     lon_min, lat_min, lon_max, lat_max = bbox
     if lon_min >= lon_max:
         raise ValueError(f"lon_min ({lon_min}) debe ser menor que lon_max ({lon_max})")
@@ -303,7 +362,8 @@ def _validate_date_range(date_range: DateRange) -> None:
         ) from exc
     if start > end:
         raise ValueError(
-            f"La fecha de inicio ({date_range[0]}) debe ser anterior a la de fin ({date_range[1]})"
+            f"La fecha de inicio ({date_range[0]}) debe ser anterior "
+            f"a la de fin ({date_range[1]})"
         )
 
 
