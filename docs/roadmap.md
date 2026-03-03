@@ -1,6 +1,7 @@
 # RoofScan — Roadmap
 
 Estado al 2026-03-03. Sprints 1–6 completados. Items 3, 4 y 8-Etapa-A completados.
+Sesión 2026-03-03 (2): fix OpenSearch→STAC, catastro descargado, imagen S2 descargada.
 
 ---
 
@@ -9,7 +10,7 @@ Estado al 2026-03-03. Sprints 1–6 completados. Items 3, 4 y 8-Etapa-A completa
 | RF | Descripción |
 |----|-------------|
 | RF-01 ✅ | Ingesta por coordenadas / GeoTIFF local. Bbox dibujable en mapa (`MapWidget.enable_bbox_draw` + `bbox_selected` signal). |
-| RF-02 ✅ | Descarga Sentinel-2 integrada en GUI: `DownloadDialog` con búsqueda, tabla de escenas y auto-selección por menor nubosidad. Auto-carga al terminar. |
+| RF-02 ✅ | Descarga Sentinel-2 integrada en GUI: `DownloadDialog` con búsqueda, tabla de escenas y auto-selección por menor nubosidad. Auto-carga al terminar. **Nota:** reescrito en 2026-03-03 para usar STAC API + OData (la OpenSearch API de cdsetool fue dada de baja el 2026-02-02). |
 | RF-03 | Carga manual de GeoTIFF local. |
 | RF-04 | Cloud masking con banda SCL (archivo separado cargable en GUI). |
 | RF-05 | Motor clásico: NDVI / NDBI / NDWI + morfología. |
@@ -123,8 +124,12 @@ python scripts/batch_mensura.py \
 
 **Pendiente para completar el objetivo:**
 - [x] Descargar catastro — `scripts/download_catastro.py` listo (WFS operativo).
-- [ ] Ejecutar `download_catastro.py` en el entorno local para generar el .gpkg.
-- [ ] Ejecutar el pipeline sobre una imagen real y verificar resultados.
+- [x] Ejecutar `download_catastro.py` → `data/catastro/lujan_parcelas.gpkg` generado.
+- [x] Descargar imagen Sentinel-2 → `S2C_MSIL2A_20260206T134701_N0512_R024_T21HUB_20260206T170915_stacked.tif` (0.0% nubes, 2026-02-06). Imagen cargada en GUI correctamente.
+- [ ] Ejecutar `seleccionar_muestra.py` → CSV de 20 parcelas para validación manual.
+- [ ] Medir las 20 parcelas manualmente en Google Maps (completar `area_manual_m2` y `tipo_manual`).
+- [ ] Ejecutar `batch_mensura.py` sobre las 20 parcelas y sobre el partido completo.
+- [ ] Comparar resultados con medición manual → calcular IoU y MAPE reales.
 - [ ] Si la detección clásica no es suficientemente precisa, correr con motor U-Net (requiere preentrenamiento previo con `prepare_tiles.py` + `pretrain_unet.py`).
 
 ---
