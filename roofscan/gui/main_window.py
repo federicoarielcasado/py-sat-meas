@@ -394,9 +394,19 @@ class MainWindow(QMainWindow):
         self.lbl_file.setStyleSheet("color: #6c757d;")
         layout.addWidget(self.lbl_file)
 
+        row_open = QHBoxLayout()
         self.btn_open = QPushButton("Abrir GeoTIFF…")
         self.btn_open.setToolTip("Cargar imagen satelital en formato GeoTIFF")
-        layout.addWidget(self.btn_open)
+        row_open.addWidget(self.btn_open)
+        layout.addLayout(row_open)
+
+        self.btn_download_s2 = QPushButton("⬇  Descargar Sentinel-2…")
+        self.btn_download_s2.setFont(QFont("Segoe UI", 8))
+        self.btn_download_s2.setToolTip(
+            "Buscar y descargar una imagen Sentinel-2 L2A desde CDSE.\n"
+            "Requiere credenciales CDSE configuradas en el archivo .env."
+        )
+        layout.addWidget(self.btn_download_s2)
 
         # SCL — máscara de nubes (opcional, Sentinel-2 L2A)
         sep = QFrame()
@@ -524,6 +534,7 @@ class MainWindow(QMainWindow):
         self.chk_arba.stateChanged.connect(self._on_toggle_arba_overlay)
         self.btn_use_parcel.clicked.connect(self._on_use_parcel)
         self.btn_open.clicked.connect(self._on_open_file)
+        self.btn_download_s2.clicked.connect(self._on_download_image)
         self.btn_open_scl.clicked.connect(self._on_open_scl_file)
         self.btn_clear_scl.clicked.connect(self._on_clear_scl)
         self.btn_run.clicked.connect(self._on_run_detection)
@@ -670,33 +681,10 @@ class MainWindow(QMainWindow):
         )
 
     def _on_use_parcel(self) -> None:
-        """Usa el bbox de la parcela seleccionada como área de descarga/análisis."""
-        if not self._selected_parcel:
+        """Abre el diálogo de descarga Sentinel-2 con el bbox de la parcela seleccionada."""
+        if not self._selected_parcel or self._current_bbox_wgs84 is None:
             return
-
-        bbox = self._current_bbox_wgs84
-        if bbox is None:
-            return
-
-        lon_min, lat_min, lon_max, lat_max = bbox
-        msg = (
-            f"El área seleccionada cubre:\n"
-            f"  Lon: {lon_min:.5f} → {lon_max:.5f}\n"
-            f"  Lat: {lat_min:.5f} → {lat_max:.5f}\n\n"
-            f"Para descargar la imagen Sentinel-2 de esta zona, usá el bbox "
-            f"con download_sentinel2() o cargá un GeoTIFF ya descargado que cubra esta área."
-        )
-
-        # Mostrar bbox en el status y en un mensaje informativo
-        box = QMessageBox(self)
-        box.setWindowTitle("Área de análisis definida")
-        box.setText(msg)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.exec()
-
-        self.statusBar().showMessage(
-            f"Área definida | bbox=({lon_min:.5f},{lat_min:.5f},{lon_max:.5f},{lat_max:.5f})"
-        )
+        self._on_download_image()
 
     # ------------------------------------------------------------------
     # Slots — Imagen y análisis
@@ -707,8 +695,17 @@ class MainWindow(QMainWindow):
             self, "Abrir imagen satelital", "",
             "Archivos raster (*.tif *.tiff *.img);;Todos los archivos (*)"
         )
-        if not path:
-            return
+        if path:
+            self._load_file(path)
+
+    def _load_file(self, path: str, scl_path: str = "") -> None:
+        """Carga una imagen GeoTIFF en la interfaz y muestra la preview RGB.
+
+        Args:
+            path: Ruta al GeoTIFF principal (multibanda).
+            scl_path: Ruta al archivo SCL opcional. Si se provee, se carga
+                      automáticamente como máscara de nubes.
+        """
         try:
             from roofscan.core.ingesta.loader import load_geotiff
             data = load_geotiff(path)
@@ -721,6 +718,13 @@ class MainWindow(QMainWindow):
         self.lbl_file.setText(name)
         self.lbl_file.setStyleSheet("color: #212529;")
         self.btn_run.setEnabled(True)
+
+        # Cargar SCL si se proveyó (ej: descarga automática)
+        if scl_path and Path(scl_path).exists():
+            self._scl_file = scl_path
+            self.lbl_scl.setText(Path(scl_path).name)
+            self.lbl_scl.setStyleSheet("color: #155724;")
+            self.btn_clear_scl.setEnabled(True)
 
         # Calcular bounds WGS84 para habilitar el clic georreferenciado
         geo_extent = self._compute_geo_extent_wgs84(data)
@@ -748,6 +752,20 @@ class MainWindow(QMainWindow):
                     self.map_widget.set_parcelas_overlay(self._wms_array_cache)
         except Exception:
             pass
+
+    def _on_download_image(self) -> None:
+        """Abre el diálogo de búsqueda y descarga de Sentinel-2 desde CDSE."""
+        from roofscan.gui.download_dialog import DownloadDialog
+        dlg = DownloadDialog(bbox=self._current_bbox_wgs84, parent=self)
+        dlg.image_ready.connect(self._on_image_downloaded)
+        dlg.exec()
+
+    def _on_image_downloaded(self, geotiff_path: str, scl_path: str) -> None:
+        """Auto-carga la imagen descargada una vez que el diálogo termina."""
+        self._load_file(geotiff_path, scl_path)
+        self.statusBar().showMessage(
+            f"Imagen descargada y cargada: {Path(geotiff_path).name}"
+        )
 
     def _on_run_detection(self) -> None:
         if not self._current_file:

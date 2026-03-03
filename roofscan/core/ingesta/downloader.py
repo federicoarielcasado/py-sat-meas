@@ -213,6 +213,64 @@ def download_sentinel2(
     return downloaded_paths
 
 
+def download_by_id(scene: dict, output_dir: Path | None = None) -> Path:
+    """Descarga una escena Sentinel-2 específica dado su dict de metadatos.
+
+    Equivalente a ``download_sentinel2`` pero opera sobre una escena ya
+    identificada por la búsqueda, evitando repetir la consulta a la API.
+
+    Args:
+        scene: Dict con al menos ``{"id": str, "name": str}`` tal como
+               lo retorna :func:`search_sentinel2`.
+        output_dir: Directorio de destino. Por defecto usa ``config.CACHE_DIR``.
+
+    Returns:
+        :class:`pathlib.Path` al directorio ``.SAFE`` descargado.
+
+    Raises:
+        EnvironmentError: Si las credenciales CDSE no están configuradas.
+        ConnectionError: Si falla la comunicación con la API de CDSE.
+        ImportError: Si cdsetool no está instalado.
+    """
+    if output_dir is None:
+        output_dir = CACHE_DIR
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    _check_credentials()
+
+    try:
+        from cdsetool.download import download_feature
+        from cdsetool.credentials import Credentials
+    except ImportError as exc:
+        raise ImportError("La librería 'cdsetool' no está instalada.") from exc
+
+    scene_id = scene["id"]
+    scene_name = scene["name"]
+    dest = output_dir / scene_name
+
+    if dest.exists():
+        log.info("Escena ya descargada, omitiendo: %s", scene_name)
+        return dest
+
+    user = os.environ["CDSE_USER"]
+    password = os.environ["CDSE_PASSWORD"]
+    credentials = Credentials(user, password)
+
+    log.info(
+        "Descargando %s (nube=%.1f%%, ~%.0f MB)…",
+        scene_name, scene.get("cloud_pct", 0), scene.get("size_mb", 0),
+    )
+    try:
+        download_feature(scene_id, str(output_dir), credentials)
+        log.info("Descarga completa: %s", dest)
+        return dest
+    except Exception as exc:
+        raise ConnectionError(
+            f"Error al descargar la escena {scene_name}: {exc}"
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Helpers privados
 # ---------------------------------------------------------------------------
