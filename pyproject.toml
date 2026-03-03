@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "roofscan"
@@ -15,7 +15,7 @@ dependencies = [
     "shapely>=2.0",
     "geopandas>=0.14",
     "pyproj>=3.6",
-    "cdsetool>=0.3",
+    "cdsetool>=0.2",
     "python-dotenv>=1.0",
     "numpy>=1.26",
     "pandas>=2.0",

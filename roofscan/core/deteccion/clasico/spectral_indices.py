@@ -48,7 +48,7 @@ _IDX = {
 
 # Umbrales por defecto calibrados para Luján (techos de zinc, tejas, hormigón)
 DEFAULT_NDVI_MAX = 0.20   # por encima → vegetación → no techo
-DEFAULT_NDBI_MIN = -0.05  # por debajo → no construido → no techo
+DEFAULT_NDBI_MIN = 0.05   # por debajo → no construido → no techo
 DEFAULT_NDWI_MAX = 0.05   # por encima → agua → no techo
 
 

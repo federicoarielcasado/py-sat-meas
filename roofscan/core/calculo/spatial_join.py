@@ -32,8 +32,8 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-# CRS de trabajo: UTM zona 20S, unidades en metros
-_WORK_CRS = "EPSG:32720"
+# CRS de trabajo: UTM zona 21S (Luján ~59°W → zona 21S 60°W-54°W)
+_WORK_CRS = "EPSG:32721"
 
 
 # ---------------------------------------------------------------------------
@@ -92,17 +92,21 @@ def join_roofs_to_parcelas(
     parcelas_utm = _ensure_crs(gdf_parcelas, work_crs)
 
     # Calcular área de parcelas en m² (desde geometría proyectada)
-    parcelas_utm = parcelas_utm.copy()
+    parcelas_utm = parcelas_utm.copy().reset_index(drop=True)
     parcelas_utm["area_parcela_m2"] = parcelas_utm.geometry.area
 
-    # Intersección espacial: cada techo recibe el índice de la parcela que lo contiene
+    # Intersección espacial: left=parcelas, right=techos
+    # → geometry del resultado = geometría de la parcela (left)
+    # → index_right = índice del techo candidato en roofs_utm
     log.info("  Ejecutando sjoin (intersects)…")
     joined = gpd.sjoin(
-        roofs_utm[["geometry", "area_m2", "roof_id"]],
-        parcelas_utm.reset_index(drop=True),
-        how="right",
+        parcelas_utm,
+        roofs_utm[["geometry", "area_m2", "roof_id"]].reset_index(drop=True),
+        how="left",
         predicate="intersects",
     )
+    # roofs_utm con índice 0-based para lookup por posición
+    roofs_indexed = roofs_utm.reset_index(drop=True)
 
     # Para cada par (techo, parcela), calcular la intersección real
     log.info("  Calculando intersecciones exactas…")
@@ -110,21 +114,19 @@ def join_roofs_to_parcelas(
 
     for idx_parcela, parcela_row in parcelas_utm.iterrows():
         parcela_geom = parcela_row.geometry
-        # Techos que intersectan esta parcela
-        mask = joined["index_right"] == idx_parcela
-        techos_candidatos = joined[mask]
+        # Con how="left", el índice de joined ES el índice de parcelas_utm
+        rows = joined.loc[joined.index == idx_parcela]
+        techo_indices = rows["index_right"].dropna().astype(int)
 
         techo_area_total = 0.0
         n_techos = 0
 
-        for _, techo_row in techos_candidatos.iterrows():
-            if hasattr(techo_row, "geometry") and techo_row.geometry is not None:
-                try:
-                    inter = parcela_geom.intersection(techo_row.geometry)
-                    inter_area = inter.area
-                except Exception:
-                    inter_area = 0.0
-            else:
+        for roof_idx in techo_indices:
+            try:
+                roof_geom = roofs_indexed.loc[roof_idx, "geometry"]
+                inter = parcela_geom.intersection(roof_geom)
+                inter_area = inter.area
+            except Exception:
                 inter_area = 0.0
 
             if inter_area >= min_intersection_m2:

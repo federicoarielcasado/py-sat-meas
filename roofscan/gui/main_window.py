@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
         # Parámetros motor clásico
         self.spin_ndvi = self._labeled_spin(layout, "NDVI máx (vegetación):", -1.0, 1.0, 0.20, 0.05,
             "Píxeles con NDVI > umbral se descartan como vegetación")
-        self.spin_ndbi = self._labeled_spin(layout, "NDBI mín (construido):", -1.0, 1.0, 0.10, 0.05,
+        self.spin_ndbi = self._labeled_spin(layout, "NDBI mín (construido):", -1.0, 1.0, 0.05, 0.05,
             "Píxeles con NDBI < umbral se descartan como no construidos")
         self.spin_ndwi = self._labeled_spin(layout, "NDWI máx (agua):", -1.0, 1.0, 0.05, 0.05,
             "Píxeles con NDWI > umbral se descartan como agua")
