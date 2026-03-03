@@ -86,17 +86,54 @@ python -m roofscan
 ### Flujo básico
 
 1. **Buscar dirección** → geocodifica y muestra el overlay de parcelas ARBA
-2. **Cargar imagen GeoTIFF** → preview RGB automático
-3. **Seleccionar motor** (Clásico o U-Net) y ajustar parámetros si se desea
-4. **Detectar techos** → visualización del resultado con área total
-5. **Exportar** → CSV, GeoJSON, Shapefile o PNG
+2. **Descargar imagen Sentinel-2** → botón integrado en la GUI, búsqueda por bbox/fecha/nubosidad, descarga y conversión automática
+3. **O cargar imagen GeoTIFF** ya descargada → preview RGB automático
+4. **Seleccionar motor** (Clásico o U-Net) y ajustar parámetros si se desea
+5. **Detectar techos** → visualización del resultado con área total
+6. **Exportar** → CSV, GeoJSON, Shapefile o PNG
 
 ### Motor U-Net
 
-El motor U-Net requiere pesos entrenados en `data/models/unet_best.pth`. Para generarlos:
+El motor U-Net requiere pesos entrenados en `data/models/unet_best.pth`. Hay dos formas de generarlos:
+
+**Opción A — Preentrenamiento con datos públicos (recomendado como punto de partida):**
+```bash
+# 1. Generar tiles de entrenamiento desde Google Open Buildings + imágenes Sentinel-2
+python scripts/prepare_tiles.py \
+    --buildings data/pretrain/ARG.gpkg \
+    --tiles-dir data/cache/ \
+    --output-dir data/pretrain/
+
+# 2. Entrenar el modelo
+python scripts/pretrain_unet.py \
+    --tiles-dir data/pretrain/ \
+    --output data/models/unet_pretrained.pth
+```
+
+**Opción B — Fine-tuning con datos locales:**
 1. Ejecutar al menos 2 detecciones con el motor Clásico.
 2. Guardar cada detección como feedback desde la pestaña *Validación*.
 3. Hacer clic en *Reentrenar modelo U-Net*.
+
+### Mensura masiva por parcela
+
+Para mensurar la totalidad de un partido catastral (ej: Luján) de forma automática:
+
+```bash
+# 1. Descargar catastro de parcelas (una sola vez)
+#    Fuente: https://datos.gba.gob.ar/dataset/catastro-territorial
+#    Guardar en: data/catastro/lujan.gpkg
+
+# 2. Ejecutar mensura masiva
+python scripts/batch_mensura.py \
+    --image data/cache/S2A_MSIL2A_..._stacked.tif \
+    --parcelas data/catastro/lujan.gpkg \
+    --output data/output/mensura_lujan.csv
+
+# Resultado: CSV con una fila por parcela (área de techo, % cubierto, nomenclatura)
+```
+
+También admite una lista de partidas específicas con `--partidas mis_partidas.csv`.
 
 ---
 
@@ -105,18 +142,25 @@ El motor U-Net requiere pesos entrenados en `data/models/unet_best.pth`. Para ge
 ```
 roofscan/
 ├── core/
-│   ├── ingesta/          # Descarga Sentinel-2, carga GeoTIFF, WMS CartoARBA
+│   ├── ingesta/          # Descarga Sentinel-2, conversión .SAFE→GeoTIFF, WMS/WFS CartoARBA
 │   ├── preproceso/       # Cloud masking, reproyección, normalización
 │   ├── deteccion/
 │   │   ├── clasico/      # Índices espectrales + morfología
 │   │   └── dl/           # U-Net, predictor, trainer
-│   ├── calculo/          # Cálculo de área, geometrías
+│   ├── calculo/          # Cálculo de área, geometrías, intersección parcel↔techo
 │   ├── exportacion/      # CSV, GeoTIFF, PNG
 │   └── validacion/       # Métricas, feedback store
-├── gui/                  # Ventana principal, mapa, resultados, validación
+├── gui/                  # Ventana principal, mapa, diálogo de descarga, resultados
+├── scripts/
+│   ├── prepare_tiles.py  # Genera tiles .npy para preentrenamiento U-Net
+│   ├── pretrain_unet.py  # Entrena U-Net con tiles de edificios públicos
+│   └── batch_mensura.py  # Mensura masiva de parcelas desde CLI
 ├── data/
 │   ├── models/           # Pesos del modelo U-Net
 │   ├── feedback/         # Dataset local acumulado
+│   ├── pretrain/         # Tiles para preentrenamiento
+│   ├── catastro/         # Archivos catastrales locales (gpkg/shp)
+│   ├── output/           # Resultados de mensura masiva
 │   └── cache/            # Imágenes satelitales descargadas
 └── tests/
 ```
@@ -170,8 +214,9 @@ build_conda.bat
 ## Limitaciones conocidas
 
 - Sentinel-2 tiene resolución de 10 m/px. Techos con superficie < ~30 m² se detectan con menor precisión.
-- El motor U-Net requiere al menos 2 pares de feedback para poder entrenarse.
-- La descarga automática de imágenes desde la GUI es funcionalidad pendiente; por el momento se recomienda cargar un GeoTIFF ya descargado.
+- El motor U-Net requiere pesos preentrenados (`data/models/unet_best.pth`) para funcionar. Ver sección *Motor U-Net*.
+- La descarga de imágenes desde CDSE requiere credenciales gratuitas configuradas en `.env`.
+- Para la mensura masiva, el catastro de parcelas debe descargarse manualmente una vez desde datos.gba.gob.ar (el WFS de ARBA no está disponible públicamente de forma estable).
 
 ---
 
