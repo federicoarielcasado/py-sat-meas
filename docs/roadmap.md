@@ -1,6 +1,6 @@
 # RoofScan — Roadmap
 
-Estado al 2026-03-03. Sprints 1–6 completados.
+Estado al 2026-03-03. Sprints 1–6 completados. Items 3, 4 y 8-Etapa-A completados.
 
 ---
 
@@ -8,14 +8,14 @@ Estado al 2026-03-03. Sprints 1–6 completados.
 
 | RF | Descripción |
 |----|-------------|
-| RF-01 (parcial) | Ingesta por coordenadas / GeoTIFF local. Falta: dibujar polígono/bbox en mapa. |
+| RF-01 ✅ | Ingesta por coordenadas / GeoTIFF local. Bbox dibujable en mapa (`MapWidget.enable_bbox_draw` + `bbox_selected` signal). |
 | RF-02 ✅ | Descarga Sentinel-2 integrada en GUI: `DownloadDialog` con búsqueda, tabla de escenas y auto-selección por menor nubosidad. Auto-carga al terminar. |
 | RF-03 | Carga manual de GeoTIFF local. |
 | RF-04 | Cloud masking con banda SCL (archivo separado cargable en GUI). |
 | RF-05 | Motor clásico: NDVI / NDBI / NDWI + morfología. |
 | RF-06 | Motor U-Net: ResNet34 encoder, tiling + Gaussian blending, fine-tuning local. |
 | RF-07 | Cálculo de área en m² con EPSG:32720. |
-| RF-08 | Exportación CSV, GeoJSON, Shapefile, PNG anotado. |
+| RF-08 ✅ | Exportación CSV, GeoJSON, Shapefile, PNG anotado. Módulos dedicados: `geojson_exporter.py`, `shp_exporter.py`. |
 | RF-09 | ❌ Edición manual de polígonos. Baja prioridad, diferido. |
 | RF-10 | Feedback + log de validaciones + reentrenamiento incremental U-Net. |
 | RF-11 | Zona por defecto: Luján (configurable en `config.py`). |
@@ -35,24 +35,21 @@ Estado al 2026-03-03. Sprints 1–6 completados.
 
 ---
 
-### 3. Bbox/polígono dibujable en el mapa *(media prioridad)*
+### ~~3. Bbox/polígono dibujable en el mapa~~ *(completado)*
 
-`MapWidget` detecta clics y emite `geo_clicked(lat, lon)`, pero no permite
-trazar geometrías interactivas para definir el área de análisis.
-
-**Opciones de implementación:**
-- **Rubber-band Qt:** dibujar rectángulo con `QRubberBand` sobre el widget de imagen.
-- **Folium editable:** usar `folium.plugins.Draw` en el HTML embebido + bridge JS→Python.
+Implementado con `matplotlib.widgets.RectangleSelector` en `MapWidget`.
+- Señal `bbox_selected(lon_min, lat_min, lon_max, lat_max)` emitida al soltar el ratón.
+- Botón checkable "⬚ Dibujar área de análisis" en la GUI (`btn_draw_bbox`).
+- Coordenadas convertidas desde píxeles de imagen a WGS84 usando `_geo_extent_wgs84`.
 
 ---
 
-### 4. Exportadores modulares GeoJSON / Shapefile *(media prioridad)*
+### ~~4. Exportadores modulares GeoJSON / Shapefile~~ *(completado)*
 
-La exportación de vectores está inline en `main_window.py`. Extraer a módulos
-dedicados para consistencia arquitectónica y facilitar tests unitarios:
-
-- `roofscan/core/exportacion/geojson_exporter.py` → `export_geojson(gdf, output_dir)`
-- `roofscan/core/exportacion/shp_exporter.py` → `export_shapefile(gdf, output_dir)`
+- `roofscan/core/exportacion/geojson_exporter.py` → `export_geojson(gdf, output_path)`
+- `roofscan/core/exportacion/shp_exporter.py` → `export_shapefile(gdf, output_path)` con renombrado automático de columnas > 10 chars.
+- `main_window.py` y `batch_mensura.py` actualizados para usar los módulos.
+- Tests en `tests/test_calculo.py` (se activan cuando geopandas está disponible).
 
 ---
 
@@ -138,17 +135,13 @@ orientativa: *vivienda*, *galpón / nave industrial*, *otro*.
 
 **Secuencia de implementación recomendada (de menor a mayor complejidad):**
 
-#### Etapa A — Reglas geométricas (sin ML adicional)
-Opera sobre el GeoDataFrame que ya produce `spatial_join.py`. No requiere imagen.
-
-| Regla | Clase tentativa |
-|-------|-----------------|
-| `area_techos_m2 < 400` y compacidad ≥ 0.5 | Vivienda |
-| `area_techos_m2 ≥ 400` y elongación > 2 | Galpón / nave |
-| `area_techos_m2 ≥ 2000` | Industrial / comercial |
-
-Compacidad: `4π·área / perímetro²` (1 = círculo, → 0 = muy elongado).
-Implementar en `roofscan/core/calculo/classifier.py` → `classify_by_geometry(gdf)`.
+#### ~~Etapa A — Reglas geométricas~~ *(completado)*
+Implementado en `roofscan/core/calculo/classifier.py`:
+- `compute_shape_metrics(geometry)` → compacidad (`4π·A/P²`) + elongación (MBR).
+- `classify_by_geometry(gdf)` → columna `tipo_estructura` en GeoDataFrame de techos.
+- `classify_parcela(gdf)` → columna `tipo_predominante` en resumen de parcelas.
+- Flag `--classify` en `batch_mensura.py` activa ambas clasificaciones y exporta GeoJSON de techos clasificados (`_roofs.geojson`).
+- Tests en `tests/test_calculo.py` (31 tests: 5 pasan sin deps, 26 se activan con geopandas).
 
 #### Etapa B — Firma espectral (requiere imagen Sentinel-2)
 Las bandas SWIR (B11, B12) discriminan materiales de techo:

@@ -139,6 +139,14 @@ def _parse_args() -> argparse.Namespace:
         help="Incluir columnas centroide_lat, centroide_lon en el CSV.",
     )
     p.add_argument(
+        "--classify", action="store_true",
+        help=(
+            "Clasificar tipo de estructura (vivienda / galpon_nave / industrial / otro) "
+            "usando reglas geométricas. Agrega columna 'tipo_estructura' a los techos y "
+            "'tipo_predominante' al CSV de parcelas."
+        ),
+    )
+    p.add_argument(
         "--min-roof-m2", type=float, default=10.0,
         help="Superficie mínima en m² para considerar un polígono como techo (default: 10.0).",
     )
@@ -383,6 +391,23 @@ def main() -> None:
         sys.exit(1)
 
     # ------------------------------------------------------------------
+    # Paso 4b (opcional): Clasificación de tipo de estructura
+    # ------------------------------------------------------------------
+    if args.classify:
+        log.info("=" * 60)
+        log.info("PASO 4b — Clasificando tipo de estructura (reglas geométricas)…")
+        try:
+            from roofscan.core.calculo.classifier import classify_by_geometry, classify_parcela
+            gdf_roofs = classify_by_geometry(gdf_roofs)
+            resultado = classify_parcela(resultado)
+            dist_roofs = gdf_roofs["tipo_estructura"].value_counts().to_dict()
+            dist_parcelas = resultado["tipo_predominante"].value_counts().to_dict()
+            log.info("  Distribución techos:   %s", dist_roofs)
+            log.info("  Distribución parcelas: %s", dist_parcelas)
+        except Exception as exc:
+            log.warning("Clasificación no disponible: %s", exc)
+
+    # ------------------------------------------------------------------
     # Paso 5: Exportar resultados
     # ------------------------------------------------------------------
     log.info("=" * 60)
@@ -399,10 +424,20 @@ def main() -> None:
     if args.output_geojson:
         geojson_path = args.output.with_suffix(".geojson")
         try:
-            resultado.to_file(geojson_path, driver="GeoJSON")
-            log.info("GeoJSON exportado: %s", geojson_path)
+            from roofscan.core.exportacion.geojson_exporter import export_geojson
+            export_geojson(resultado, geojson_path)
+            log.info("GeoJSON parcelas exportado: %s", geojson_path)
         except Exception as exc:
-            log.warning("No se pudo exportar GeoJSON: %s", exc)
+            log.warning("No se pudo exportar GeoJSON de parcelas: %s", exc)
+
+        if args.classify and len(gdf_roofs) > 0:
+            roofs_geojson = args.output.with_name(args.output.stem + "_roofs.geojson")
+            try:
+                from roofscan.core.exportacion.geojson_exporter import export_geojson
+                export_geojson(gdf_roofs, roofs_geojson)
+                log.info("GeoJSON techos clasificados exportado: %s", roofs_geojson)
+            except Exception as exc:
+                log.warning("No se pudo exportar GeoJSON de techos: %s", exc)
 
     # ------------------------------------------------------------------
     # Resumen final
