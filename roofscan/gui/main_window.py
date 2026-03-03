@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
         # Parámetros motor clásico
         self.spin_ndvi = self._labeled_spin(layout, "NDVI máx (vegetación):", -1.0, 1.0, 0.20, 0.05,
             "Píxeles con NDVI > umbral se descartan como vegetación")
-        self.spin_ndbi = self._labeled_spin(layout, "NDBI mín (construido):", -1.0, 1.0, -0.05, 0.05,
+        self.spin_ndbi = self._labeled_spin(layout, "NDBI mín (construido):", -1.0, 1.0, 0.10, 0.05,
             "Píxeles con NDBI < umbral se descartan como no construidos")
         self.spin_ndwi = self._labeled_spin(layout, "NDWI máx (agua):", -1.0, 1.0, 0.05, 0.05,
             "Píxeles con NDWI > umbral se descartan como agua")
@@ -806,6 +806,13 @@ class MainWindow(QMainWindow):
 
     def _on_analysis_finished(self, results: dict) -> None:
         self._results = results
+        # Auto-switch to detection overlay so the user sees the result immediately
+        idx_overlay = next(
+            (i for i in range(self.combo_view.count())
+             if self.combo_view.itemText(i) == "Overlay detección"),
+            1,
+        )
+        self.combo_view.setCurrentIndex(idx_overlay)
         self._refresh_map_view()
         self.results_panel.show_results(results["areas"], results.get("resolution_m"))
         for btn in (self.btn_export_geotiff, self.btn_export_png,
@@ -1026,6 +1033,8 @@ class MainWindow(QMainWindow):
                 from rasterio.transform import array_bounds as ab
                 b = ab(h, w, data["transform"])
                 left, bottom, right, top = b.left, b.bottom, b.right, b.top
+            elif isinstance(bounds, tuple):
+                left, bottom, right, top = bounds
             else:
                 left, bottom, right, top = bounds.left, bounds.bottom, bounds.right, bounds.top
 
