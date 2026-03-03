@@ -408,6 +408,15 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.btn_download_s2)
 
+        self.btn_draw_bbox = QPushButton("⬚  Dibujar área de análisis")
+        self.btn_draw_bbox.setFont(QFont("Segoe UI", 8))
+        self.btn_draw_bbox.setCheckable(True)
+        self.btn_draw_bbox.setToolTip(
+            "Arrastrá el ratón sobre el mapa para definir el área de descarga.\n"
+            "El bbox dibujado se usará como zona de búsqueda en Descargar Sentinel-2."
+        )
+        layout.addWidget(self.btn_draw_bbox)
+
         # SCL — máscara de nubes (opcional, Sentinel-2 L2A)
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -544,7 +553,9 @@ class MainWindow(QMainWindow):
         self.btn_export_geojson.clicked.connect(self._on_export_geojson)
         self.btn_export_shp.clicked.connect(self._on_export_shp)
         self.btn_export_csv.clicked.connect(self._on_export_csv)
+        self.btn_draw_bbox.toggled.connect(self._on_toggle_draw_bbox)
         self.map_widget.geo_clicked.connect(self._on_map_geo_click)
+        self.map_widget.bbox_selected.connect(self._on_bbox_drawn)
 
     # ------------------------------------------------------------------
     # Slots — Localización y CartoARBA
@@ -835,6 +846,31 @@ class MainWindow(QMainWindow):
             self._refresh_map_view()
 
     # ------------------------------------------------------------------
+    # Slots — Dibujo de bbox
+
+    def _on_toggle_draw_bbox(self, checked: bool) -> None:
+        """Activa o desactiva el modo de dibujo de bounding box en el mapa."""
+        self.map_widget.enable_bbox_draw(checked)
+        if checked:
+            self.btn_draw_bbox.setText("⬚  Dibujando… (arrastrá el ratón)")
+            self.statusBar().showMessage(
+                "Modo dibujo activo — arrastrá el ratón sobre el mapa para definir el área."
+            )
+        else:
+            self.btn_draw_bbox.setText("⬚  Dibujar área de análisis")
+
+    def _on_bbox_drawn(
+        self, lon_min: float, lat_min: float, lon_max: float, lat_max: float
+    ) -> None:
+        """Recibe el bbox dibujado, lo almacena y desactiva el modo dibujo."""
+        self._current_bbox_wgs84 = (lon_min, lat_min, lon_max, lat_max)
+        # Desactivar modo dibujo automáticamente
+        self.btn_draw_bbox.setChecked(False)
+        self.statusBar().showMessage(
+            f"Área de análisis definida: "
+            f"{lon_min:.4f},{lat_min:.4f} → {lon_max:.4f},{lat_max:.4f}"
+        )
+
     # Slots — Exportación
     # ------------------------------------------------------------------
 
@@ -872,10 +908,11 @@ class MainWindow(QMainWindow):
             return
         try:
             from roofscan.core.calculo.geometry_merger import labels_to_geodataframe
+            from roofscan.core.exportacion.geojson_exporter import export_geojson
             morph = self._results["morph"]
             data = self._results["data"]
             gdf = labels_to_geodataframe(morph["labels"], data["transform"], data["crs"], self._results["areas"])
-            gdf.to_file(path, driver="GeoJSON")
+            export_geojson(gdf, path)
             self.statusBar().showMessage(f"GeoJSON guardado: {path}")
         except Exception as exc:
             self._show_error("No se pudo guardar el GeoJSON", str(exc))
@@ -890,17 +927,13 @@ class MainWindow(QMainWindow):
             return
         try:
             from roofscan.core.calculo.geometry_merger import labels_to_geodataframe
+            from roofscan.core.exportacion.shp_exporter import export_shapefile
             morph = self._results["morph"]
             data = self._results["data"]
             gdf = labels_to_geodataframe(
                 morph["labels"], data["transform"], data["crs"], self._results["areas"]
             )
-            # Shapefile: truncar nombres de columna a 10 chars (limitación del formato)
-            gdf = gdf.rename(columns={
-                "area_m2": "area_m2",
-                "area_px": "area_px",
-            })
-            gdf.to_file(path, driver="ESRI Shapefile", encoding="utf-8")
+            export_shapefile(gdf, path)
             self.statusBar().showMessage(f"Shapefile guardado: {path}")
         except Exception as exc:
             self._show_error("No se pudo guardar el Shapefile", str(exc))
