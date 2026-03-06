@@ -31,5 +31,8 @@ where = ["."]
 include = ["roofscan*"]
 
 [tool.pytest.ini_options]
-markers = ["network: tests que requieren conexión a internet y credenciales CDSE"]
+markers = [
+    "network: tests que requieren conexión a internet y credenciales CDSE",
+    "torch: tests que requieren PyTorch instalado",
+]
 testpaths = ["tests"]

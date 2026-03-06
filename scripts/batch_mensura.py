@@ -147,6 +147,23 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--material", action="store_true",
+        help=(
+            "Clasificar material de techo (zinc_corrugado / losa_hormigon / "
+            "tejas_ceramica / construccion_incompleta) usando firma espectral. "
+            "Sin modelos entrenados aplica reglas espectrales automáticamente. "
+            "Agrega columnas 'material', 'material_score' y 'material_method' a los techos."
+        ),
+    )
+    p.add_argument(
+        "--material-mlp", type=Path, default=None,
+        help="Pesos del MLP clasificador de material (.pth). Solo se usa con --material.",
+    )
+    p.add_argument(
+        "--material-cnn", type=Path, default=None,
+        help="Pesos de la CNN clasificadora de material (.pth). Solo se usa con --material.",
+    )
+    p.add_argument(
         "--min-roof-m2", type=float, default=10.0,
         help="Superficie mínima en m² para considerar un polígono como techo (default: 10.0).",
     )
@@ -408,6 +425,47 @@ def main() -> None:
             log.warning("Clasificación no disponible: %s", exc)
 
     # ------------------------------------------------------------------
+    # Paso 4c (opcional): Clasificación de material de techo
+    # ------------------------------------------------------------------
+    if args.material:
+        log.info("=" * 60)
+        log.info("PASO 4c — Clasificando material de techo (firma espectral)…")
+        try:
+            from roofscan.core.deteccion.dl.material_classifier import (
+                build_material_cnn, build_material_mlp,
+                classify_roof_materials, load_weights,
+            )
+
+            mlp_model = None
+            cnn_model = None
+
+            if args.material_mlp and args.material_mlp.exists():
+                mlp_model = build_material_mlp()
+                mlp_model = load_weights(mlp_model, args.material_mlp)
+                mlp_model.eval()
+                log.info("  MLP cargado desde %s", args.material_mlp)
+
+            if args.material_cnn and args.material_cnn.exists():
+                cnn_model = build_material_cnn()
+                cnn_model = load_weights(cnn_model, args.material_cnn)
+                cnn_model.eval()
+                log.info("  CNN cargada desde %s", args.material_cnn)
+
+            if mlp_model is None and cnn_model is None:
+                log.info("  Sin modelos entrenados — usando reglas espectrales.")
+
+            gdf_roofs = classify_roof_materials(
+                data, gdf_roofs,
+                mlp_model=mlp_model,
+                cnn_model=cnn_model,
+            )
+            dist = gdf_roofs["material"].value_counts().to_dict()
+            log.info("  Distribución de materiales: %s", dist)
+
+        except Exception as exc:
+            log.warning("Clasificación de material no disponible: %s", exc)
+
+    # ------------------------------------------------------------------
     # Paso 5: Exportar resultados
     # ------------------------------------------------------------------
     log.info("=" * 60)
@@ -430,7 +488,7 @@ def main() -> None:
         except Exception as exc:
             log.warning("No se pudo exportar GeoJSON de parcelas: %s", exc)
 
-        if args.classify and len(gdf_roofs) > 0:
+        if (args.classify or args.material) and len(gdf_roofs) > 0:
             roofs_geojson = args.output.with_name(args.output.stem + "_roofs.geojson")
             try:
                 from roofscan.core.exportacion.geojson_exporter import export_geojson
