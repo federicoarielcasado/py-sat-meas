@@ -240,6 +240,29 @@ class ParcelInfoWorker(QObject):
             self.error.emit(str(exc))
 
 
+class ParcelsVectorWorker(QObject):
+    """Carga un GeoDataFrame de parcelas desde un archivo vectorial en background.
+
+    Soporta .gpkg, .shp y .geojson.  Puede tardar varios segundos para
+    archivos grandes (ej: ~140 k parcelas de Luján), pero libera la GUI.
+    """
+    finished = pyqtSignal(object)   # GeoDataFrame
+    error    = pyqtSignal(str)
+
+    def __init__(self, filepath: str):
+        super().__init__()
+        self.filepath = filepath
+
+    def run(self) -> None:
+        try:
+            import geopandas as gpd
+            gdf = gpd.read_file(self.filepath)
+            self.finished.emit(gdf)
+        except Exception as exc:
+            log.error("Error cargando parcelas vectoriales: %s", exc, exc_info=True)
+            self.error.emit(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Ventana principal
 # ---------------------------------------------------------------------------
@@ -257,6 +280,7 @@ class MainWindow(QMainWindow):
         self._current_bbox_wgs84 = None     # bbox WGS84 del mapa visible
         self._selected_parcel = None         # info de la parcela seleccionada
         self._worker_thread = None
+        self._gdf_parcelas = None            # GeoDataFrame de parcelas vectoriales cargadas
 
         self.setWindowTitle(self.APP_TITLE)
         self.resize(1350, 820)
@@ -381,6 +405,28 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.btn_use_parcel)
 
+        # ── Capa vectorial de parcelas ──────────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep2)
+
+        self.btn_load_parcelas = QPushButton("📂 Cargar parcelas (.gpkg/.shp)")
+        self.btn_load_parcelas.setFont(QFont("Segoe UI", 8))
+        self.btn_load_parcelas.setToolTip(
+            "Carga un archivo vectorial de parcelas catastrales y lo superpone\n"
+            "sobre la imagen satelital con georeferenciamiento preciso.\n"
+            "Admite .gpkg, .shp y .geojson.\n"
+            "Podés generarlo con: python scripts/download_catastro.py"
+        )
+        layout.addWidget(self.btn_load_parcelas)
+
+        self.lbl_selection_info = QLabel("Sin parcelas vectoriales cargadas")
+        self.lbl_selection_info.setFont(QFont("Segoe UI", 8))
+        self.lbl_selection_info.setWordWrap(True)
+        self.lbl_selection_info.setStyleSheet("color: #6c757d;")
+        layout.addWidget(self.lbl_selection_info)
+
         return box
 
     def _build_file_panel(self) -> QGroupBox:
@@ -500,6 +546,14 @@ class MainWindow(QMainWindow):
         self.combo_view.addItems(["RGB True Color", "Overlay detección", "NDVI", "NDBI", "NDWI"])
         self.combo_view.setFont(QFont("Segoe UI", 9))
         layout.addWidget(self.combo_view)
+
+        self.btn_reset_zoom = QPushButton("🔭 Restablecer zoom")
+        self.btn_reset_zoom.setFont(QFont("Segoe UI", 8))
+        self.btn_reset_zoom.setToolTip(
+            "Vuelve a la vista completa de la imagen.\n"
+            "También podés hacer scroll con la rueda del mouse para hacer zoom."
+        )
+        layout.addWidget(self.btn_reset_zoom)
         return box
 
     def _build_export_panel(self) -> QGroupBox:
@@ -556,6 +610,10 @@ class MainWindow(QMainWindow):
         self.btn_draw_bbox.toggled.connect(self._on_toggle_draw_bbox)
         self.map_widget.geo_clicked.connect(self._on_map_geo_click)
         self.map_widget.bbox_selected.connect(self._on_bbox_drawn)
+        self.btn_load_parcelas.clicked.connect(self._on_load_parcelas_vector)
+        self.btn_reset_zoom.clicked.connect(self.map_widget.reset_zoom)
+        self.map_widget.parcel_vector_clicked.connect(self._on_parcel_vector_clicked)
+        self.map_widget.parcels_vector_selected.connect(self._on_parcels_vector_selected)
 
     # ------------------------------------------------------------------
     # Slots — Localización y CartoARBA
@@ -737,6 +795,13 @@ class MainWindow(QMainWindow):
             self.lbl_scl.setStyleSheet("color: #155724;")
             self.btn_clear_scl.setEnabled(True)
 
+        # Registrar georeferenciamiento en el MapWidget (necesario para
+        # superponer parcelas vectoriales con posicionamiento preciso)
+        try:
+            self.map_widget.set_image_georef(data["transform"], str(data["crs"]))
+        except Exception:
+            pass
+
         # Calcular bounds WGS84 para habilitar el clic georreferenciado
         geo_extent = self._compute_geo_extent_wgs84(data)
         if geo_extent:
@@ -877,6 +942,106 @@ class MainWindow(QMainWindow):
             f"Área de análisis definida: "
             f"{lon_min:.4f},{lat_min:.4f} → {lon_max:.4f},{lat_max:.4f}"
         )
+
+    # ------------------------------------------------------------------
+    # Slots — Capa vectorial de parcelas
+    # ------------------------------------------------------------------
+
+    def _on_load_parcelas_vector(self) -> None:
+        """Carga un archivo vectorial de parcelas y lo superpone en el mapa."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Cargar parcelas catastrales", "",
+            "Vectoriales (*.gpkg *.shp *.geojson);;Todos los archivos (*)"
+        )
+        if not path:
+            return
+
+        self.btn_load_parcelas.setEnabled(False)
+        self.lbl_selection_info.setText("Cargando parcelas…")
+        self.lbl_selection_info.setStyleSheet("color: #856404;")
+        self.statusBar().showMessage(f"Cargando parcelas: {Path(path).name}…")
+
+        self._parcels_thread = QThread()
+        self._parcels_worker = ParcelsVectorWorker(path)
+        self._parcels_worker.moveToThread(self._parcels_thread)
+        self._parcels_thread.started.connect(self._parcels_worker.run)
+        self._parcels_worker.finished.connect(self._on_parcelas_loaded)
+        self._parcels_worker.error.connect(self._on_parcelas_error)
+        self._parcels_worker.finished.connect(self._parcels_thread.quit)
+        self._parcels_worker.error.connect(self._parcels_thread.quit)
+        self._parcels_thread.finished.connect(
+            lambda: self.btn_load_parcelas.setEnabled(True)
+        )
+        self._parcels_thread.start()
+
+    def _on_parcelas_loaded(self, gdf) -> None:
+        """Recibe el GeoDataFrame y lo pasa al MapWidget."""
+        self._gdf_parcelas = gdf
+        self.map_widget.set_parcelas_vector(gdf)
+        n = len(gdf)
+        self.lbl_selection_info.setText(f"{n:,} parcelas cargadas · hacé clic para seleccionar")
+        self.lbl_selection_info.setStyleSheet("color: #155724;")
+        self.statusBar().showMessage(f"Parcelas cargadas: {n:,} polígonos.")
+
+    def _on_parcelas_error(self, msg: str) -> None:
+        self.lbl_selection_info.setText("Error al cargar parcelas")
+        self.lbl_selection_info.setStyleSheet("color: #721c24;")
+        self._show_error("No se pudo cargar el archivo de parcelas", msg)
+        self.statusBar().showMessage("Error cargando parcelas.")
+
+    def _on_parcel_vector_clicked(self, idx: int) -> None:
+        """Responde al clic sobre una parcela vectorial: la selecciona y muestra info."""
+        if self._gdf_parcelas is None:
+            return
+        self.map_widget.select_parcelas([idx])
+
+        row = self._gdf_parcelas.iloc[idx]
+        parts = []
+        for col in ("nomenclatura", "partido", "seccion", "manzana", "parcela", "area_m2"):
+            val = row.get(col) if hasattr(row, "get") else (row[col] if col in row.index else None)
+            if val is not None:
+                label_col = "Área (m²)" if col == "area_m2" else col.capitalize()
+                parts.append(f"{label_col}: {val}")
+        info_text = "\n".join(parts) if parts else f"Índice: {idx}"
+
+        self.lbl_parcel_info.setText(info_text)
+        self.lbl_parcel_info.setStyleSheet("color: #155724; font-weight: bold;")
+        self.lbl_selection_info.setText("1 parcela seleccionada")
+        self.lbl_selection_info.setStyleSheet("color: #004085;")
+        self.statusBar().showMessage(f"Parcela seleccionada — índice {idx}")
+
+    def _on_parcels_vector_selected(self, indices: list) -> None:
+        """Responde a la selección múltiple de parcelas por bbox."""
+        if not indices:
+            self.lbl_selection_info.setText(
+                f"{len(self._gdf_parcelas):,} parcelas cargadas · hacé clic para seleccionar"
+                if self._gdf_parcelas is not None else "Sin parcelas vectoriales cargadas"
+            )
+            self.lbl_selection_info.setStyleSheet("color: #155724;")
+            return
+
+        self.map_widget.select_parcelas(indices)
+        n = len(indices)
+
+        area_total = None
+        if self._gdf_parcelas is not None and "area_m2" in self._gdf_parcelas.columns:
+            try:
+                area_total = float(self._gdf_parcelas.iloc[indices]["area_m2"].sum())
+            except Exception:
+                pass
+
+        if area_total is not None:
+            self.lbl_selection_info.setText(
+                f"{n} parcela(s) seleccionada(s) · {area_total:,.1f} m²"
+            )
+        else:
+            self.lbl_selection_info.setText(f"{n} parcela(s) seleccionada(s)")
+        self.lbl_selection_info.setStyleSheet("color: #004085;")
+
+        msg = f"{n} parcela(s) seleccionada(s)"
+        if area_total is not None:
+            msg += f" | área total: {area_total:,.1f} m²"
+        self.statusBar().showMessage(msg)
 
     # Slots — Exportación
     # ------------------------------------------------------------------
