@@ -146,7 +146,9 @@ def detect_sensor(metadata: dict[str, Any]) -> str:
         return "desconocido"
 
     for sensor_name, expected_res in _SENSOR_RESOLUTION_MAP.items():
-        if abs(res - expected_res) <= _RES_TOLERANCE_M:
+        # Comparación estricta (< en vez de <=) para evitar ambigüedad
+        # en la frontera entre sensores cercanos (ej: SPOT-6/7 1.5m vs Pleiades 0.5m)
+        if abs(res - expected_res) < _RES_TOLERANCE_M:
             return sensor_name
 
     return "desconocido"

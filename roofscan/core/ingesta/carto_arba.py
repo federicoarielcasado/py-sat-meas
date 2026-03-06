@@ -388,7 +388,10 @@ def _parse_wms_error(xml_text: str) -> str:
     try:
         root = ET.fromstring(xml_text)
         for elem in root.iter():
-            if "ServiceException" in elem.tag and elem.text:
+            # Comparar solo el nombre local del tag (sin namespace URI ni prefijo)
+            # para evitar falsos positivos con ServiceExceptionReport
+            tag_local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            if tag_local == "ServiceException" and elem.text and elem.text.strip():
                 return elem.text.strip()
     except ET.ParseError:
         pass

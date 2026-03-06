@@ -152,8 +152,10 @@ class TestClassifyByGeometry:
 
 class TestClassifyParcela:
     def _gdf(self, rows):
+        # geopandas >= 0.14 requiere columna geometry para asignar CRS;
+        # classify_parcela no usa geometría ni CRS, así que omitimos ambos.
         gpd = pytest.importorskip("geopandas")
-        return gpd.GeoDataFrame(rows, crs="EPSG:4326")
+        return gpd.GeoDataFrame(rows)
 
     def test_large_area_is_industrial(self):
         from roofscan.core.calculo.classifier import classify_parcela, LABEL_INDUSTRIAL
@@ -182,7 +184,7 @@ class TestClassifyParcela:
     def test_missing_col_raises(self):
         from roofscan.core.calculo.classifier import classify_parcela
         gpd = pytest.importorskip("geopandas")
-        gdf = gpd.GeoDataFrame([{"area_techos_m2": 100.0}], crs="EPSG:4326")
+        gdf = gpd.GeoDataFrame([{"area_techos_m2": 100.0}])
         with pytest.raises(KeyError):
             classify_parcela(gdf)
 

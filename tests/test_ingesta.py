@@ -200,13 +200,16 @@ class TestDownloaderValidations:
             search_sentinel2((-59.15, -34.60, -59.05, -34.53), ("2024-03-31", "2024-01-01"))
 
     def test_missing_credentials_raises_env_error(self, monkeypatch):
-        from roofscan.core.ingesta.downloader import search_sentinel2
+        # search_sentinel2 usa la STAC API pública de CDSE (sin autenticación).
+        # Las credenciales solo se validan en download_sentinel2_scene / _get_token.
+        # Este test verifica que _check_credentials() lanza EnvironmentError.
+        from roofscan.core.ingesta.downloader import _check_credentials
 
         monkeypatch.delenv("CDSE_USER", raising=False)
         monkeypatch.delenv("CDSE_PASSWORD", raising=False)
 
         with pytest.raises(EnvironmentError, match="Credenciales"):
-            search_sentinel2((-59.15, -34.60, -59.05, -34.53), ("2024-01-01", "2024-03-31"))
+            _check_credentials()
 
 
 # ---------------------------------------------------------------------------

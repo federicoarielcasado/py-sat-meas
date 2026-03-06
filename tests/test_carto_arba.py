@@ -98,8 +98,9 @@ class TestParseFeatureInfoGml:
 
     def test_extracts_nomenclatura(self):
         from roofscan.core.ingesta.carto_arba import _parse_feature_info_gml
+        # El namespace debe declararse para que ET.fromstring() no falle
         xml = """<?xml version="1.0"?>
-        <FeatureCollection>
+        <FeatureCollection xmlns:idera="http://www.gba.gob.ar/idera/">
           <featureMember>
             <idera:Parcela>
               <idera:nomenclatura>070-B-045-12-0031/00</idera:nomenclatura>
@@ -114,7 +115,7 @@ class TestParseFeatureInfoGml:
     def test_extracts_seccion_manzana(self):
         from roofscan.core.ingesta.carto_arba import _parse_feature_info_gml
         xml = """<?xml version="1.0"?>
-        <FeatureCollection>
+        <FeatureCollection xmlns:idera="http://www.gba.gob.ar/idera/">
           <featureMember>
             <idera:Parcela>
               <idera:seccion>B</idera:seccion>
