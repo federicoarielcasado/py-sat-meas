@@ -1,7 +1,7 @@
 # RoofScan — Roadmap
 
-Estado al 2026-03-03. Sprints 1–6 completados. Items 3, 4 y 8-Etapa-A completados.
-Sesión 2026-03-03 (2): fix OpenSearch→STAC, catastro descargado, imagen S2 descargada.
+Estado al 2026-03-06. Sprints 1–6 completados. Items 3, 4, 8-Etapa-A y 8-Etapa-B completados.
+Sesión 2026-03-06: material_classifier.py (CNN+MLP espectral), mejoras GUI mapa, 11 tests corregidos, plan de entrenamiento, train_material_classifier.py.
 
 ---
 
@@ -23,6 +23,9 @@ Sesión 2026-03-03 (2): fix OpenSearch→STAC, catastro descargado, imagen S2 de
 | RF-12 ✅ | Conversión .SAFE → GeoTIFF multibanda (`safe_loader.py`): apila B02-B12, remuestrea 20m→10m, exporta SCL separado. |
 | RF-13 ✅ | Scripts de preentrenamiento U-Net: `prepare_tiles.py` (tiles desde Open Buildings + Sentinel-2) y `pretrain_unet.py` (entrena con BCE+Dice loss). |
 | RF-14 ✅ | Mensura masiva por parcela: `wfs_arba.py` (3 estrategias de obtención), `spatial_join.py` (intersección techo↔parcela) y `batch_mensura.py` (pipeline CLI completo). |
+| RF-15 ✅ | Clasificador de material de techo (`material_classifier.py`): CNN multi-escala + MLP espectral (29 features → 4 materiales). Fallback por reglas espectrales sin ML. Integrado en `batch_mensura.py` con flags `--material`, `--material-mlp`, `--material-cnn`. |
+| RF-16 ✅ | GUI MapWidget mejorado: zoom con scroll centrado en cursor, capa vectorial de parcelas georeferenciada (LineCollection + sindex para 10k+ polígonos), selección por clic y por bbox, señales `parcel_vector_clicked` / `parcels_vector_selected`. Botones "Cargar parcelas" y "Restablecer zoom" en MainWindow. |
+| RF-17 ✅ | Script de entrenamiento supervisado del clasificador de material: `scripts/train_material_classifier.py`. Soporta MLP y CNN, early stopping, sobremuestreo, split estratificado. Requiere GeoJSON con columna `material` etiquetada manualmente. |
 
 ---
 
@@ -149,17 +152,17 @@ Implementado en `roofscan/core/calculo/classifier.py`:
 - Flag `--classify` en `batch_mensura.py` activa ambas clasificaciones y exporta GeoJSON de techos clasificados (`_roofs.geojson`).
 - Tests en `tests/test_calculo.py` (31 tests: 5 pasan sin deps, 26 se activan con geopandas).
 
-#### Etapa B — Firma espectral (requiere imagen Sentinel-2)
-Las bandas SWIR (B11, B12) discriminan materiales de techo:
-
-| Material | Característica |
-|----------|----------------|
-| Chapa / zinc | Alta reflectancia B11+B12 |
-| Losa de hormigón | Reflectancia plana y media |
-| Tejas coloniales | Absorción característica en B12 |
-
-Calcular media espectral por polígono → clasificador k-NN o árbol de decisión.
-Requiere ~50 polígonos etiquetados manualmente como ground-truth.
+#### ~~Etapa B — Firma espectral~~ *(completado — 2026-03-06)*
+Implementado en `roofscan/core/deteccion/dl/material_classifier.py`:
+- `build_material_mlp()`: MLP 29→128→64→32→4 con BatchNorm + Dropout 0.3 (features espectrales).
+- `build_material_cnn()`: CNN multi-escala 3×3 ∥ 5×5 + GAP, parches 32×32 px (6 bandas).
+- `extract_spectral_stats()`: 6 bandas × 4 estadísticas + 5 índices = 29 features.
+- `classify_roof_materials()`: cascada CNN+MLP → MLP → CNN → reglas espectrales (fallback).
+- `save_weights()` / `load_weights()`: persistencia de pesos.
+- `scripts/train_material_classifier.py`: entrenamiento supervisado con GeoJSON etiquetado.
+  Soporta split estratificado, sobremuestreo (WeightedRandomSampler), early stopping.
+- Tests: `tests/test_material_classifier.py` (17 tests sin torch + 5 @pytest.mark.torch).
+- Guía de entrenamiento en `docs/training_plan.md`.
 
 #### Etapa C — U-Net multi-clase (máxima precisión)
 Ampliar la salida del modelo de binaria (techo/no-techo) a N clases.
